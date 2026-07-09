@@ -6,19 +6,11 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
-    flake-utils.lib.eachDefaultSystem (
-      system:
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        # trafilatura is in nixpkgs under python3XXPackages.trafilatura.
-        # Pin to the Hermes Python version (3.12 or 3.13).
-        pythonPkgs = pkgs.python312Packages;
+        pythonPkgs = pkgs.python3Packages;
       in
       {
         packages.default = pythonPkgs.buildPythonPackage rec {
@@ -33,7 +25,7 @@
           pythonImportsCheck = [ "trafilatura_scrape" ];
           meta = with pkgs.lib; {
             description = "Firecrawl-compatible web scrape server backed by trafilatura";
-            homepage = "https://github.com/NousResearch/hermes-agent";
+            homepage = "https://codeberg.org/racci/trafilatura_scrape";
             license = licenses.mit;
             mainProgram = "trafilatura-scrape";
           };

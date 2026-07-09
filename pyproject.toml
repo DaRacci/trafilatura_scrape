@@ -23,8 +23,8 @@ dependencies = [
 trafilatura-scrape = "trafilatura_scrape.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/NousResearch/hermes-agent"
-Repository = "https://github.com/NousResearch/hermes-agent"
+Homepage = "https://codeberg.org/racci/trafilatura_scrape"
+Repository = "https://codeberg.org/racci/trafilatura_scrape"
 
 [tool.setuptools.packages.find]
 include = ["trafilatura_scrape*"]
