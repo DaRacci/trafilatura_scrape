@@ -1,26 +1,5 @@
-{ lib, buildPythonPackage, fetchPypi, python312Packages, callPackage }:
+{ lib, buildPythonPackage, python312Packages }:
 
-let
-  # trafilatura is not in nixpkgs; build from PyPI
-  trafilatura = python312Packages.buildPythonPackage rec {
-    pname = "trafilatura";
-    version = "2.1.0";
-    src = fetchPypi {
-      inherit pname version;
-      hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # FIXME
-    };
-    propagatedBuildInputs = with python312Packages; [
-      courlan
-      dateparser
-      htmldate
-      justext
-      lxml
-      lxml-html-clean
-    ];
-    doCheck = false;
-    pythonImportsCheck = [ "trafilatura" ];
-  };
-in
 buildPythonPackage rec {
   pname = "trafilatura-scrape";
   version = "1.0.0";

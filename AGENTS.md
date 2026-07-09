@@ -26,7 +26,10 @@ nix build            # via flake
 nix build .#default  # explicit
 ```
 
-First build will fail with a hash mismatch for `trafilatura` (lib.fakeSha256 placeholder). Copy the `got:` hash from the error into `flake.nix` and `default.nix`.
+No hash-fixing needed — `trafilatura` is available in nixpkgs directly
+as `python3XXPackages.trafilatura`. The flake pins to `python312Packages`;
+if your nixpkgs has it under 3.13, change `python312Packages` to
+`python313Packages` in `flake.nix` or override in your integration.
 
 ## Running
 
