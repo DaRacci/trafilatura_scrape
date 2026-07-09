@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trafilatura-scrape"
+version = "1.0.0"
+description = "Firecrawl-compatible web scrape server backed by trafilatura"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["web-scraping", "trafilatura", "firecrawl", "hermes"]
+authors = [
+  { name = "Racci Dev Bot" },
+]
+
+dependencies = [
+  "trafilatura>=2.0",
+  "requests>=2.28",
+]
+
+[project.scripts]
+trafilatura-scrape = "trafilatura_scrape.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/NousResearch/hermes-agent"
+Repository = "https://github.com/NousResearch/hermes-agent"
+
+[tool.setuptools.packages.find]
+include = ["trafilatura_scrape*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
