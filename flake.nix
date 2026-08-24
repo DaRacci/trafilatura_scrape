@@ -10,30 +10,15 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        pythonPkgs = pkgs.python3Packages;
       in
       {
-        packages.default = pythonPkgs.buildPythonPackage rec {
-          pname = "trafilatura-scrape";
-          version = "1.0.0";
-          src = ./.;
-          propagatedBuildInputs = with pythonPkgs; [
-            trafilatura
-            requests
-          ];
-          doCheck = false;
-          pythonImportsCheck = [ "trafilatura_scrape" ];
-          meta = with pkgs.lib; {
-            description = "Firecrawl-compatible web scrape server backed by trafilatura";
-            homepage = "https://codeberg.org/racci/trafilatura_scrape";
-            license = licenses.mit;
-            mainProgram = "trafilatura-scrape";
-          };
-        };
+        packages.default = pkgs.callPackage ./nix/package.nix { };
 
         apps.default = flake-utils.lib.mkApp {
           drv = self.packages.${system}.default;
         };
       }
-    );
+    ) // {
+      nixosModules.default = import ./nix/module.nix;
+    };
 }

@@ -1,10 +1,12 @@
-{ lib, buildPythonPackage, pythonPackages }:
+{ lib, python3Packages }:
 
-buildPythonPackage rec {
+python3Packages.buildPythonPackage rec {
   pname = "trafilatura-scrape";
   version = "1.0.0";
-  src = ./.;
-  propagatedBuildInputs = with pythonPackages; [
+  src = ./..;
+  pyproject = true;
+  build-system = [ python3Packages.setuptools ];
+  propagatedBuildInputs = with python3Packages; [
     trafilatura
     requests
   ];
@@ -15,5 +17,6 @@ buildPythonPackage rec {
     homepage = "https://codeberg.org/racci/trafilatura_scrape";
     license = licenses.mit;
     maintainers = [ ];
+    mainProgram = "trafilatura-scrape";
   };
 }
