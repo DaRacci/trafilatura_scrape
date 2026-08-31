@@ -60,8 +60,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/")
-        if path != "/v1/scrape":
-            self._err("Not found. Use POST /v1/scrape", status=404)
+        if path not in ("/v1/scrape", "/v2/scrape"):
+            self._err("Not found. Use POST /v2/scrape (or /v1/scrape)", status=404)
             return
 
         # Read body
