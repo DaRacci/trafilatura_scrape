@@ -67,11 +67,19 @@ def extract(url: str, fmt: str = "markdown") -> Dict[str, Any]:
         include_tables=True,
     ) or ""
 
+    metadata = {
+        "title": title,
+        "sourceURL": final_url,
+        "statusCode": resp.status_code,
+        "contentType": resp.headers.get("Content-Type", ""),
+    }
+
+    status = resp.status_code
+    if status not in range(200, 300) and status != 304:
+        metadata["error"] = f"HTTP {status}"
+
     return {
         "markdown": markdown,
         "html": html,
-        "metadata": {
-            "title": title,
-            "sourceURL": final_url,
-        },
+        "metadata": metadata,
     }
