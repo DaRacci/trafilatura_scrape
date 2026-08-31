@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 
 from trafilatura_scrape.scrape import batch_extract, extract
+from trafilatura_scrape.map import map_site
 from trafilatura_scrape import search as search_mod
 from trafilatura_scrape.search import search as _search
 
@@ -137,9 +138,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._do_batch_scrape()
             return
 
+        if path == "/v2/map":
+            self._do_map()
+            return
+
         if path not in ("/v1/scrape", "/v2/scrape"):
             self._err(
-                "Not found. Use POST /v2/scrape or POST /v2/search", status=404
+                "Not found. Use POST /v2/scrape, POST /v2/map or POST /v2/search",
+                status=404,
             )
             return
 
@@ -176,6 +182,45 @@ class _Handler(BaseHTTPRequestHandler):
             log.exception("scrape failed for %s", url)
             self._err(str(exc), status=500)
 
+
+    def _do_map(self) -> None:
+        """Firecrawl v2 map: sitemap + page links for one site."""
+        length = int(self.headers.get("Content-Length", "0"))
+        if length == 0:
+            self._err("Empty request body", status=400)
+            return
+
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError as exc:
+            self._err(f"Invalid JSON: {exc}", status=400)
+            return
+
+        url = (body.get("url") or "").strip()
+        if not url:
+            self._err("Missing 'url' field", status=400)
+            return
+
+        try:
+            limit = int(body.get("limit") or 100)
+        except (TypeError, ValueError):
+            self._err("'limit' must be an integer", status=400)
+            return
+
+        include_subdomains = bool(body.get("includeSubdomains") or False)
+        search = body.get("search") or None
+
+        log.info("mapping: %s (limit=%d)", url, limit)
+        out = map_site(
+            url,
+            limit=limit,
+            include_subdomains=include_subdomains,
+            search=search,
+        )
+        if not out.get("success"):
+            self._err(out.get("error", "map failed"), status=502)
+        else:
+            self._json(out)
 
     def _do_batch_scrape(self) -> None:
         """Sync batch scrape: parallel extraction, per-URL error isolation."""
