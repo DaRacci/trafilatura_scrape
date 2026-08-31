@@ -81,13 +81,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._err("Missing 'url' field", status=400)
             return
 
-        # Firecrawl sends formats=["markdown"] or ["markdown", "html"]
-        formats: List[str] = body.get("formats", ["markdown"])
-        fmt = "markdown" if "markdown" in formats else "html"
+        # Firecrawl v2 formats: list of strings and/or object formats.
+        formats: List[Any] = body.get("formats", ["markdown"])
 
-        log.info("scraping: %s  (format=%s)", url, fmt)
+        log.info("scraping: %s  (formats=%s)", url, formats)
         try:
-            data = extract(url, fmt=fmt)
+            data = extract(url, formats=formats)
             self._json({"success": True, "data": data})
         except requests.Timeout:
             self._err("Request timed out after 30s", status=504)

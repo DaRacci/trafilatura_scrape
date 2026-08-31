@@ -8,7 +8,8 @@ lives in :mod:`trafilatura_scrape.handler`.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urljoin
 
 import requests
 import trafilatura
@@ -25,6 +26,19 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
+#: String formats this backend actually computes; anything else
+#: (object formats like ``{"type": "json", ...}``) becomes a warning.
+SUPPORTED_FORMATS = ("markdown", "html", "rawHtml", "links", "images", "summary")
+
+#: Firecrawl response key order: warning first, then formats, then metadata.
+_FORMAT_KEY_ORDER = ("warning",) + SUPPORTED_FORMATS
+
+_A_HREF_RE = re.compile(r"<a\b[^>]*\bhref\s*=\s*[\"']([^\"'#]+)[\"']", re.IGNORECASE)
+_IMG_SRC_RE = re.compile(r"<img\b[^>]*\bsrc\s*=\s*[\"']([^\"'#]+)[\"']", re.IGNORECASE)
+_SKIP_HREF_RE = re.compile(r"^(?:javascript:|mailto:|tel:|data:)", re.IGNORECASE)
+
+# attribute markers for <img srcset> etc. — keep it simple: just src.
+
 
 def _extract_title(html: str) -> str:
     """Pull the <title> tag from raw HTML."""
@@ -34,13 +48,92 @@ def _extract_title(html: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def extract(url: str, fmt: str = "markdown") -> Dict[str, Any]:
+def _normalize_formats(
+    formats: Optional[Union[List[Any], str]], fmt: Optional[str] = None
+) -> List[Any]:
+    """Normalize the ``formats`` argument to a plain list.
+
+    Accepts ``None`` (→ ``["markdown"]``), a single string (legacy), or a
+    mixed list of strings and objects. ``fmt`` (legacy kwarg) maps to
+    ``[fmt]`` when ``formats`` is not given.
+    """
+    if formats is None:
+        return [fmt] if fmt else ["markdown"]
+    if isinstance(formats, str):
+        return [formats]
+    return list(formats)
+
+
+def _collect_urls(raw_html: str, base_url: str, kind: str) -> List[str]:
+    """Extract absolute, deduplicated URLs from raw HTML.
+
+    *kind* is ``"links"`` (``<a href>``) or ``"images"`` (``<img src>``).
+    Skips javascript:/mailto: style schemes and pure ``#`` fragments;
+    for links, also drops same-page anchors and internal ``#...`` targets.
+    Dedupe preserves first-seen order.
+    """
+    regex = _A_HREF_RE if kind == "links" else _IMG_SRC_RE
+    seen: set = set()
+    out: List[str] = []
+    for href in regex.findall(raw_html):
+        href = href.strip()
+        if not href:
+            continue
+        if kind == "links":
+            if href.startswith("#"):
+                continue  # same-page anchor
+            if _SKIP_HREF_RE.match(href):
+                continue
+        # relative URLs without a scheme are still resolved against base
+        absolute = urljoin(base_url, href)
+        if kind == "links" and absolute.startswith("#"):
+            continue
+        parsed_scheme = absolute.split(":", 1)[0].lower()
+        if parsed_scheme not in ("http", "https"):
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        out.append(absolute)
+    return out
+
+
+def _make_summary(markdown: str) -> str:
+    """Extractive summary: first ~200 chars, truncated at a word boundary."""
+    text = " ".join(markdown.split())
+    if not text:
+        return ""
+    if len(text) <= 200:
+        return text
+    cut = text[:200]
+    last_space = cut.rfind(" ")
+    if last_space > 0:
+        cut = cut[:last_space]
+    return cut.rstrip(" .,;:-—") + "…"
+
+
+def extract(
+    url: str,
+    formats: Optional[Union[List[Any], str]] = None,
+    fmt: Optional[str] = None,
+) -> Dict[str, Any]:
     """Fetch *url* and extract content with trafilatura.
 
-    Returns the Firecrawl ``data`` sub-shape so the Hermes provider's
-    ``_extract_scrape_payload`` normalizer picks it up as::
+    *formats* is the Firecrawl v2 ``formats`` list — either a list of
+    strings (``["markdown", "links"]``) or a mixed list that may contain
+    object formats (``{"type": "json", ...}``), which this backend does
+    not support and therefore only reports in a top-level ``warning``.
 
-        {"markdown": …, "html": …, "metadata": {…}}
+    Supported string formats: ``markdown``, ``html``, ``rawHtml``,
+    ``links``, ``images``, ``summary``. ``None`` defaults to
+    ``["markdown"]``; a single string (or the legacy ``fmt=`` kwarg)
+    maps to a one-item list for backward compatibility.
+
+    Returns the Firecrawl ``data`` sub-shape: ``warning`` first (only
+    when unsupported formats were requested), then one key per requested
+    string format, then ``metadata`` last::
+
+        {"markdown": …, "links": […], "metadata": {…}}
     """
     resp = requests.get(
         url, headers=_HEADERS, timeout=30, allow_redirects=True,
@@ -51,21 +144,68 @@ def extract(url: str, fmt: str = "markdown") -> Dict[str, Any]:
     raw_html = resp.text
     title = _extract_title(raw_html)
 
-    markdown = trafilatura.extract(
-        raw_html,
-        output_format="markdown",
-        include_comments=False,
-        include_tables=True,
-        include_images=False,
-        include_links=True,
-    ) or ""
+    wanted = _normalize_formats(formats, fmt)
+    strings = [f for f in wanted if isinstance(f, str)]
+    objects = [f for f in wanted if not isinstance(f, str)]
 
-    html = trafilatura.extract(
-        raw_html,
-        output_format="html",
-        include_comments=False,
-        include_tables=True,
-    ) or ""
+    unsupported: List[str] = []
+    for obj in objects:
+        name = obj.get("type") if isinstance(obj, dict) else str(obj)
+        if name:
+            unsupported.append(name)
+
+    # string formats we don't compute at all (unknown names) also warn
+    for name in strings:
+        if name not in SUPPORTED_FORMATS:
+            unsupported.append(name)
+
+    warning = ""
+    if unsupported:
+        warning = (
+            "Formats not supported by this backend: " + ", ".join(unsupported)
+        )
+
+    # Compute each requested format only once, only when requested.
+    computed: Dict[str, Any] = {}
+    for name in dict.fromkeys(strings):  # dedupe, keep order
+        if name not in SUPPORTED_FORMATS:
+            continue
+        if name == "markdown":
+            computed[name] = trafilatura.extract(
+                raw_html,
+                output_format="markdown",
+                include_comments=False,
+                include_tables=True,
+                include_images=False,
+                include_links=True,
+            ) or ""
+        elif name == "html":
+            computed[name] = trafilatura.extract(
+                raw_html,
+                output_format="html",
+                include_comments=False,
+                include_tables=True,
+            ) or ""
+        elif name == "rawHtml":
+            computed[name] = raw_html
+        elif name == "links":
+            computed[name] = _collect_urls(raw_html, final_url, "links")
+        elif name == "images":
+            computed[name] = _collect_urls(raw_html, final_url, "images")
+        elif name == "summary":
+            if "markdown" in computed:
+                computed[name] = _make_summary(computed["markdown"])
+            else:
+                md = trafilatura.extract(
+                    raw_html,
+                    output_format="markdown",
+                    include_comments=False,
+                    include_tables=True,
+                    include_images=False,
+                    include_links=True,
+                ) or ""
+                computed["markdown"] = md  # reuse for summary base
+                computed[name] = _make_summary(md)
 
     metadata = {
         "title": title,
@@ -78,8 +218,14 @@ def extract(url: str, fmt: str = "markdown") -> Dict[str, Any]:
     if status not in range(200, 300) and status != 304:
         metadata["error"] = f"HTTP {status}"
 
-    return {
-        "markdown": markdown,
-        "html": html,
-        "metadata": metadata,
-    }
+    data: Dict[str, Any] = {}
+    if warning:
+        data["warning"] = warning
+    # Emit requested format keys in Firecrawl's canonical order.
+    for key in _FORMAT_KEY_ORDER:
+        if key == "warning":
+            continue
+        if key in computed:
+            data[key] = computed[key]
+    data["metadata"] = metadata
+    return data
