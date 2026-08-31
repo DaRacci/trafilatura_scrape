@@ -16,7 +16,8 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
-from trafilatura_scrape.scrape import batch_extract, extract
+from trafilatura_scrape.scrape import _HEADERS, batch_extract, extract
+from trafilatura_scrape.parse import parse_pdf
 from trafilatura_scrape.map import map_site
 from trafilatura_scrape import search as search_mod
 from trafilatura_scrape.search import search as _search
@@ -138,6 +139,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._do_batch_scrape()
             return
 
+        if path == "/v2/parse":
+            self._do_parse()
+            return
+
         if path == "/v2/map":
             self._do_map()
             return
@@ -182,6 +187,55 @@ class _Handler(BaseHTTPRequestHandler):
             log.exception("scrape failed for %s", url)
             self._err(str(exc), status=500)
 
+
+    def _do_parse(self) -> None:
+        """Firecrawl v2 parse: fetch a PDF URL and extract its text layer."""
+        # Read body
+        length = int(self.headers.get("Content-Length", "0"))
+        if length == 0:
+            self._err("Empty request body", status=400)
+            return
+
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError as exc:
+            self._err(f"Invalid JSON: {exc}", status=400)
+            return
+
+        url = (body.get("url") or "").strip()
+        if not url:
+            self._err("Missing 'url' field", status=400)
+            return
+
+        log.info("parsing: %s", url)
+        try:
+            resp = requests.get(url, headers=_HEADERS, timeout=30)
+            resp.raise_for_status()
+            final_url = resp.url
+            parsed = parse_pdf(resp.content, final_url)
+            self._json(
+                {
+                    "success": True,
+                    "data": {
+                        "markdown": parsed["markdown"],
+                        "metadata": {
+                            "title": parsed["metadata"]["title"],
+                            "numPages": parsed["metadata"]["numPages"],
+                            "sourceURL": final_url,
+                            "statusCode": resp.status_code,
+                            "contentType": resp.headers.get("Content-Type", ""),
+                        },
+                    },
+                }
+            )
+        except requests.Timeout:
+            self._err("Request timed out after 30s", status=504)
+        except requests.HTTPError as exc:
+            code = exc.response.status_code if exc.response else 502
+            self._err(f"Upstream HTTP {code}", status=502)
+        except Exception as exc:
+            log.exception("parse failed for %s", url)
+            self._err(str(exc), status=500)
 
     def _do_map(self) -> None:
         """Firecrawl v2 map: sitemap + page links for one site."""

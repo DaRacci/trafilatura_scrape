@@ -11,10 +11,12 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urljoin
 
 import requests
 import trafilatura
+
+from trafilatura_scrape.parse import parse_pdf
 
 _HEADERS = {
     "User-Agent": (
@@ -145,6 +147,23 @@ def extract(
     final_url = resp.url
     raw_html = resp.text
     title = _extract_title(raw_html)
+
+    # PDF auto-detection: by content type or a .pdf URL suffix.
+    # A PDF always yields markdown only — format filtering does not apply.
+    content_type = resp.headers.get("Content-Type", "")
+    pdf_path = urlparse(final_url).path.lower()
+    if content_type.startswith("application/pdf") or pdf_path.endswith(".pdf"):
+        parsed = parse_pdf(resp.content, final_url)
+        return {
+            "markdown": parsed["markdown"],
+            "metadata": {
+                "title": parsed["metadata"]["title"],
+                "sourceURL": final_url,
+                "statusCode": resp.status_code,
+                "contentType": content_type,
+                "numPages": parsed["metadata"]["numPages"],
+            },
+        }
 
     wanted = _normalize_formats(formats, fmt)
     strings = [f for f in wanted if isinstance(f, str)]
