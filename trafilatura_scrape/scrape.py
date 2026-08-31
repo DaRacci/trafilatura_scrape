@@ -1,8 +1,5 @@
-"""Content extraction: fetch a URL and convert HTML with trafilatura.
-
-This module holds the pure scraping logic (headers, title parsing,
-``extract``) with no HTTP layer — the Firecrawl-compatible server
-lives in :mod:`trafilatura_scrape.handler`.
+"""Content extraction: fetch a URL,
+then convert its HTML with trafilatura.
 """
 
 from __future__ import annotations
@@ -15,6 +12,7 @@ from urllib.parse import urlparse, urljoin
 
 import requests
 import trafilatura
+from pypdf.errors import PyPdfError
 
 from trafilatura_scrape.parse import parse_pdf
 
@@ -30,50 +28,58 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
-#: String formats this backend actually computes; anything else
-#: (object formats like ``{"type": "json", ...}``) becomes a warning.
 SUPPORTED_FORMATS = ("markdown", "html", "rawHtml", "links", "images", "summary")
 
-#: Firecrawl response key order: warning first, then formats, then metadata.
 _FORMAT_KEY_ORDER = ("warning",) + SUPPORTED_FORMATS
+
+_DEFAULT_FORMAT = "markdown"
+_FETCH_TIMEOUT = 30
+_SUMMARY_CHARS = 200
+_DEFAULT_WORKERS = 4
 
 _A_HREF_RE = re.compile(r"<a\b[^>]*\bhref\s*=\s*[\"']([^\"'#]+)[\"']", re.IGNORECASE)
 _IMG_SRC_RE = re.compile(r"<img\b[^>]*\bsrc\s*=\s*[\"']([^\"'#]+)[\"']", re.IGNORECASE)
 _SKIP_HREF_RE = re.compile(r"^(?:javascript:|mailto:|tel:|data:)", re.IGNORECASE)
 
-# attribute markers for <img srcset> etc. — keep it simple: just src.
-
 
 def _extract_title(html: str) -> str:
     """Pull the <title> tag from raw HTML."""
     m = re.search(
-        r'<title[^>]*>\s*(.*?)\s*</title>', html, re.IGNORECASE | re.DOTALL
+        r'<title[^>]*>\s*(.*?)\s*</title>',
+        html,
+        re.IGNORECASE | re.DOTALL,
     )
     return m.group(1).strip() if m else ""
 
 
 def _normalize_formats(
-    formats: Optional[Union[List[Any], str]], fmt: Optional[str] = None
+    formats: Optional[Union[List[Any], str]],
+    fmt: Optional[str] = None,
 ) -> List[Any]:
-    """Normalize the ``formats`` argument to a plain list.
+    """Normalize the formats argument to a plain list.
 
-    Accepts ``None`` (→ ``["markdown"]``), a single string (legacy), or a
-    mixed list of strings and objects. ``fmt`` (legacy kwarg) maps to
-    ``[fmt]`` when ``formats`` is not given.
+    Accepts None, a single string (legacy),
+    or a mixed list of strings and objects.
+    The legacy fmt kwarg maps to [fmt]
+    when formats is not given.
     """
     if formats is None:
-        return [fmt] if fmt else ["markdown"]
+        return [fmt] if fmt else [_DEFAULT_FORMAT]
     if isinstance(formats, str):
         return [formats]
     return list(formats)
 
 
-def _collect_urls(raw_html: str, base_url: str, kind: str) -> List[str]:
+def _collect_urls(
+    raw_html: str,
+    base_url: str,
+    kind: str,
+) -> List[str]:
     """Extract absolute, deduplicated URLs from raw HTML.
 
-    *kind* is ``"links"`` (``<a href>``) or ``"images"`` (``<img src>``).
-    Skips javascript:/mailto: style schemes and pure ``#`` fragments;
-    for links, also drops same-page anchors and internal ``#...`` targets.
+    kind is "links" (<a href>) or "images" (<img src>).
+    Skips javascript:/mailto: style schemes,
+    pure # fragments and same-page anchors.
     Dedupe preserves first-seen order.
     """
     regex = _A_HREF_RE if kind == "links" else _IMG_SRC_RE
@@ -85,13 +91,10 @@ def _collect_urls(raw_html: str, base_url: str, kind: str) -> List[str]:
             continue
         if kind == "links":
             if href.startswith("#"):
-                continue  # same-page anchor
+                continue
             if _SKIP_HREF_RE.match(href):
                 continue
-        # relative URLs without a scheme are still resolved against base
         absolute = urljoin(base_url, href)
-        if kind == "links" and absolute.startswith("#"):
-            continue
         parsed_scheme = absolute.split(":", 1)[0].lower()
         if parsed_scheme not in ("http", "https"):
             continue
@@ -107,13 +110,13 @@ def _make_summary(markdown: str) -> str:
     text = " ".join(markdown.split())
     if not text:
         return ""
-    if len(text) <= 200:
+    if len(text) <= _SUMMARY_CHARS:
         return text
-    cut = text[:200]
+    cut = text[:_SUMMARY_CHARS]
     last_space = cut.rfind(" ")
     if last_space > 0:
         cut = cut[:last_space]
-    return cut.rstrip(" .,;:-—") + "…"
+    return cut.rstrip(" .,;:-") + "..."
 
 
 def extract(
@@ -123,34 +126,23 @@ def extract(
 ) -> Dict[str, Any]:
     """Fetch *url* and extract content with trafilatura.
 
-    *formats* is the Firecrawl v2 ``formats`` list — either a list of
-    strings (``["markdown", "links"]``) or a mixed list that may contain
-    object formats (``{"type": "json", ...}``), which this backend does
-    not support and therefore only reports in a top-level ``warning``.
-
-    Supported string formats: ``markdown``, ``html``, ``rawHtml``,
-    ``links``, ``images``, ``summary``. ``None`` defaults to
-    ``["markdown"]``; a single string (or the legacy ``fmt=`` kwarg)
-    maps to a one-item list for backward compatibility.
-
-    Returns the Firecrawl ``data`` sub-shape: ``warning`` first (only
-    when unsupported formats were requested), then one key per requested
-    string format, then ``metadata`` last::
-
-        {"markdown": …, "links": […], "metadata": {…}}
+    Returns the Firecrawl ``data`` sub-shape:
+    one key per requested format, then ``metadata`` last.
+    Unsupported formats are reported in a top-level ``warning``.
     """
     resp = requests.get(
-        url, headers=_HEADERS, timeout=30, allow_redirects=True,
+        url,
+        headers=_HEADERS,
+        timeout=_FETCH_TIMEOUT,
+        allow_redirects=True,
     )
     resp.raise_for_status()
 
     final_url = resp.url
     raw_html = resp.text
     title = _extract_title(raw_html)
-
-    # PDF auto-detection: by content type or a .pdf URL suffix.
-    # A PDF always yields markdown only — format filtering does not apply.
     content_type = resp.headers.get("Content-Type", "")
+
     pdf_path = urlparse(final_url).path.lower()
     if content_type.startswith("application/pdf") or pdf_path.endswith(".pdf"):
         parsed = parse_pdf(resp.content, final_url)
@@ -174,8 +166,6 @@ def extract(
         name = obj.get("type") if isinstance(obj, dict) else str(obj)
         if name:
             unsupported.append(name)
-
-    # string formats we don't compute at all (unknown names) also warn
     for name in strings:
         if name not in SUPPORTED_FORMATS:
             unsupported.append(name)
@@ -183,12 +173,12 @@ def extract(
     warning = ""
     if unsupported:
         warning = (
-            "Formats not supported by this backend: " + ", ".join(unsupported)
+            "Formats not supported by this backend: "
+            + ", ".join(unsupported)
         )
 
-    # Compute each requested format only once, only when requested.
     computed: Dict[str, Any] = {}
-    for name in dict.fromkeys(strings):  # dedupe, keep order
+    for name in dict.fromkeys(strings):
         if name not in SUPPORTED_FORMATS:
             continue
         if name == "markdown":
@@ -214,10 +204,8 @@ def extract(
         elif name == "images":
             computed[name] = _collect_urls(raw_html, final_url, "images")
         elif name == "summary":
-            if "markdown" in computed:
-                computed[name] = _make_summary(computed["markdown"])
-            else:
-                md = trafilatura.extract(
+            if "markdown" not in computed:
+                computed["markdown"] = trafilatura.extract(
                     raw_html,
                     output_format="markdown",
                     include_comments=False,
@@ -225,14 +213,13 @@ def extract(
                     include_images=False,
                     include_links=True,
                 ) or ""
-                computed["markdown"] = md  # reuse for summary base
-                computed[name] = _make_summary(md)
+            computed[name] = _make_summary(computed["markdown"])
 
     metadata = {
         "title": title,
         "sourceURL": final_url,
         "statusCode": resp.status_code,
-        "contentType": resp.headers.get("Content-Type", ""),
+        "contentType": content_type,
     }
 
     status = resp.status_code
@@ -242,7 +229,6 @@ def extract(
     data: Dict[str, Any] = {}
     if warning:
         data["warning"] = warning
-    # Emit requested format keys in Firecrawl's canonical order.
     for key in _FORMAT_KEY_ORDER:
         if key == "warning":
             continue
@@ -252,12 +238,19 @@ def extract(
     return data
 
 
-def _safe_extract(url: str, formats: Optional[Union[List[Any], str]]) -> Dict[str, Any]:
-    """Extract one URL, converting any failure into a Firecrawl error doc."""
+def _safe_extract(
+    url: str,
+    formats: Optional[Union[List[Any], str]],
+) -> Dict[str, Any]:
+    """Extract one URL, converting failure into a Firecrawl error doc."""
     try:
         return {"success": True, **extract(url, formats=formats)}
-    except Exception as exc:  # noqa: BLE001 — per-URL isolation, never raise
-        return {"success": False, "error": str(exc), "metadata": {"sourceURL": url}}
+    except (requests.RequestException, PyPdfError) as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+            "metadata": {"sourceURL": url},
+        }
 
 
 def batch_extract(
@@ -267,13 +260,15 @@ def batch_extract(
 ) -> List[Dict[str, Any]]:
     """Extract *urls* in parallel, preserving request order.
 
-    Each URL is scraped independently: a failure for one URL yields a
-    ``{"success": False, "error": …, "metadata": {"sourceURL": …}}``
-    item instead of failing the whole batch. Worker count comes from
-    *max_workers* or ``SCRAPE_MAX_WORKERS`` (default 4), capped at the
-    number of URLs.
+    Each URL is scraped independently:
+    a failure for one URL yields an error item
+    instead of failing the whole batch.
+    Worker count comes from *max_workers*
+    or SCRAPE_MAX_WORKERS, capped at the number of URLs.
     """
-    workers = max_workers or int(os.environ.get("SCRAPE_MAX_WORKERS", "4"))
+    workers = max_workers or int(
+        os.environ.get("SCRAPE_MAX_WORKERS", str(_DEFAULT_WORKERS))
+    )
     workers = min(max(1, workers), max(1, len(urls)))
     with ThreadPoolExecutor(max_workers=workers) as ex:
         return list(ex.map(lambda u: _safe_extract(u, formats), urls))

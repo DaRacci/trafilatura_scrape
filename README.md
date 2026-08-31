@@ -1,10 +1,14 @@
 # trafilatura-scrape
 
-Firecrawl v2-compatible web scrape server backed by trafilatura.
-Speaks the `/v2/scrape` REST API (and keeps `/v1/scrape` for compatibility) so AI agents can use it as a web extraction backend via `FIRECRAWL_API_URL`.
+Firecrawl v2-compatible web scrape server backed by trafilatura
+and optionally SearxNG.
+Speaks the `/v2/scrape` REST API
+(and keeps `/v1/scrape` for compatibility)
+so AI agents can use it as a web extraction backend
+via `FIRECRAWL_API_URL`.
 
 - Pure Python, `pip install` and run
-- Stateless — no storage, no browser, no LLM
+- Stateless, no storage
 - Self-hosted
 
 ## Usage
@@ -12,7 +16,7 @@ Speaks the `/v2/scrape` REST API (and keeps `/v1/scrape` for compatibility) so A
 ```bash
 pip install trafilatura-scrape
 trafilatura-scrape                            # default: 127.0.0.1:8766
-SEARXNG_URL=https://search.example.com trafilatura-scrape   # enable /search
+SEARXNG_URL=https://search.example.com trafilatura-scrape   # enable the search endpoints
 python -m trafilatura_scrape                  # via module
 ```
 
@@ -22,7 +26,7 @@ python -m trafilatura_scrape                  # via module
 |---|---|---|
 | `SCRAPE_HOST` | `127.0.0.1` | Bind address |
 | `SCRAPE_PORT` | `8766` | Bind port |
-| `SEARXNG_URL` | unset | SearXNG instance for `/v1/search` and `/v2/search` (required; search returns 503 without it) |
+| `SEARXNG_URL` | unset | SearXNG instance for search (required; search returns 503 without it) |
 | `SCRAPE_LANG` | `en` | SearXNG `language` parameter |
 | `SCRAPE_MAX_WORKERS` | `4` | Threads for batch scrape |
 
@@ -51,9 +55,9 @@ The `web_extract` tool routes through this server automatically.
 | POST | `/v2/map` | List URLs for a site (sitemap + page links) |
 | POST | `/v2/parse` | Extract PDF text |
 | POST | `/v2/search` | SearXNG web/news search, optional inline scrape |
-| POST | `/v1/search` | Search, v1 (bare array) response shape |
+| POST | `/v1/search` | Search, using the v1 format |
 
-### `POST /v2/scrape` (and `/v1/scrape`)
+### `POST /v{1,2}/scrape`
 
 **Request:**
 ```json
@@ -78,9 +82,9 @@ The `web_extract` tool routes through this server automatically.
 }
 ```
 
-PDF URLs (Content-Type `application/pdf` or `.pdf` suffix) are auto-detected and parsed with `pypdf`; the response is markdown text plus `metadata.numPages`.
+PDF URLs are auto-detected and parsed with `pypdf`.
 
-### `POST /v2/search` (and `/v1/search`, `GET ?q=`)
+### `POST /v{1,2}/search`
 
 **Request:**
 ```json
@@ -99,7 +103,7 @@ PDF URLs (Content-Type `application/pdf` or `.pdf` suffix) are auto-detected and
 }
 ```
 
-`/v1/search` returns `{"success": true, "data": [<bare array of results>]}`.
+`/v1/search` returns `{"success": true, "data": [<results>]}` using the v1 format.
 `scrapeOptions` inline-scrapes the top 5 results (markdown only).
 
 ### `POST /v2/batch/scrape`
@@ -109,7 +113,7 @@ PDF URLs (Content-Type `application/pdf` or `.pdf` suffix) are auto-detected and
 {"urls": ["https://example.com", "https://example.org"], "formats": ["markdown"]}
 ```
 
-**Response:** `data` is one document (or error document) per URL, order preserved.
+**Response:** `data` is one document (or error document) per URL, order is preserved.
 ```json
 {
   "success": true,
@@ -136,7 +140,8 @@ PDF URLs (Content-Type `application/pdf` or `.pdf` suffix) are auto-detected and
 
 **Request:** `{"url": "https://example.com/paper.pdf"}`
 
-**Response:** full PDF text (via `pypdf`, text layer only — no OCR) as markdown plus `metadata.numPages`.
+**Response:** PDF text as markdown plus `metadata.numPages`.
+OCR is not used.
 
 ### `GET /health`
 
@@ -153,34 +158,37 @@ Returns `{"status": "ok", "service": "trafilatura-scrape"}`.
 | `rawHtml` | Raw response body |
 | `links` | `{internal: [...], external: [...]}` |
 | `images` | Image URL list |
-| `summary` | Extractive first ~200 chars (not LLM) |
+| `summary` | Extractive first ~200 chars |
 | `screenshot`, `json`, `changeTracking`, `query`, `branding`, `product`, ... | Skipped; a `warning` string names them |
 
-## Not supported (deliberate)
+## Not supported
 
-- **Screenshots / browser actions** — no headless browser; requests only.
-- **LLM formats (`json`, `query`, `branding`, `product`)** — no LLM; reported via `warning`.
-- **`changeTracking`** — stateless, no storage to diff against.
-- **`/v2/crawl`, async job endpoints (`/v2/batch/scrape/...`)** — synchronous only, no job store.
-- **`/v2/extract`, `/v2/agent`** — out of scope.
-- **Multipart `/parse` upload** — PDFs are fetched by URL only.
-- **PDF OCR** — text layer only.
+- Screenshots / browser actions
+- LLM assisted formats
+- `changeTracking`
+- `/v2/crawl` and async job endpoints
+- `/v2/extract`, `/v2/agent`
+- Multipart `/parse` upload
+- PDF OCR
 
 ## Search backend (SearXNG)
 
-`/v1/search` and `/v2/search` require a SearXNG instance with the `format=json` output enabled. Self-hosting is recommended; public instances rate-limit JSON access.
+`/v1/search` and `/v2/search` require a SearXNG instance
+with the `format=json` output enabled.
+Self-hosting is recommended; public instances rate-limit JSON access.
 
 ```bash
 SEARXNG_URL=https://search.example.com trafilatura-scrape
 ```
 
-Without `SEARXNG_URL`, search endpoints return 503 with a clear error. `SCRAPE_LANG` sets the SearXNG `language` parameter.
+Without `SEARXNG_URL`, search endpoints return 503 with a clear error.
+`SCRAPE_LANG` sets the SearXNG `language` parameter.
 
 ## How it works
 
 1. Receives a Firecrawl-compatible request
 2. Fetches the URL with browser-like headers via `requests`
-3. Extracts content using `trafilatura` (PDFs via `pypdf`, search via SearXNG)
+3. Extracts content using an appropriate backend
 4. Returns Firecrawl v2-shaped JSON
 
 ## Nix

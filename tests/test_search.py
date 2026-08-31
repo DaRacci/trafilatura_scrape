@@ -10,7 +10,6 @@ import pytest
 from trafilatura_scrape import search as search_mod
 from trafilatura_scrape.search import search
 
-# Fixture matching the live-validated SearXNG JSON shape.
 FIXTURE = {
     "query": "firecrawl",
     "results": [
@@ -103,7 +102,6 @@ def test_v2_news_source(capture):
     assert set(("url", "title", "snippet", "date", "position")) <= set(news[0])
     assert news[0]["date"] is None
     assert news[2]["date"] == "2026-07-01T10:00:00+00:00"
-    # SearXNG params must request the news category.
     assert capture[0]["params"]["categories"] == "news"
     assert capture[0]["params"]["format"] == "json"
 
@@ -145,7 +143,6 @@ def test_offset_maps_to_pageno(capture):
 def test_limit_trims(capture):
     out = search("firecrawl", limit=2)
     assert len(out["data"]["web"]) == 2
-    # position stays relative to the full result set, then trimmed to limit
     assert [r["position"] for r in out["data"]["web"]] == [1, 2]
 
 
@@ -163,7 +160,7 @@ def test_both_sources_makes_two_calls(capture):
     assert cats == ["", "news"]
 
 
-# ── Route tests (server-level, mocked SearXNG) ─────────────────────────
+# --- Route tests (server-level, mocked SearXNG) ---
 
 
 def test_v2_search_route(server, monkeypatch):
@@ -218,7 +215,7 @@ def test_v2_search_route_unconfigured(server, monkeypatch):
 
 @pytest.mark.skipif(
     not os.environ.get("SEARXNG_URL"),
-    reason="SEARXNG_URL not set — live network test skipped",
+    reason="SEARXNG_URL not set, live network test skipped",
 )
 def test_live_searxng():
     out = search("firecrawl", limit=3)

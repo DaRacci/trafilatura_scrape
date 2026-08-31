@@ -2,7 +2,7 @@
 
 import sys
 
-from trafilatura_scrape.server import serve
+from trafilatura_scrape.handler import serve
 
 
 def main() -> None:

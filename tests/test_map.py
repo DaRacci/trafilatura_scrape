@@ -15,7 +15,7 @@ import urllib.request
 from trafilatura_scrape import map as map_mod
 from trafilatura_scrape.map import map_site
 
-# ── Fixtures ──────────────────────────────────────────────────────────
+# --- Fixtures ---
 
 ROBOTS_TXT = (
     "User-agent: *\n"
@@ -79,7 +79,7 @@ def patch_standard(monkeypatch):
     )
 
 
-# ── map_site() unit tests ─────────────────────────────────────────────
+# --- map_site() unit tests ---
 
 
 class TestMapSite:
@@ -189,7 +189,7 @@ class TestMapSite:
         assert len(urls) == 3
 
 
-# ── Route tests: POST /v2/map ─────────────────────────────────────────
+# --- Route tests: POST /v2/map ---
 
 
 def _post(base, path, payload):

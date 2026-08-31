@@ -1,31 +1,22 @@
 """Site mapping: sitemap + page links, Firecrawl ``/v2/map`` style.
-
-Fetches the site's robots.txt-discovered sitemaps (one level of
-``<sitemapindex>`` recursion) and always also the page itself, merging
-``<a href>`` links. Pure stdlib parsing (``xml.etree.ElementTree`` +
-``re``) on top of ``requests`` — no crawler, depth 1 only.
 """
 
 from __future__ import annotations
 
-import re
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
 
-# Plain, honest UA: some hosts (e.g. codeberg.org) 403 the spoofed
-# full-Chrome UA that scrape.py uses for content extraction.
+from trafilatura_scrape.scrape import _A_HREF_RE, _SKIP_HREF_RE
+
 _HEADERS = {
     "User-Agent": "trafilatura-scrape (map) +https://codeberg.org/Racci/trafilatura_scrape",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-from trafilatura_scrape.scrape import _A_HREF_RE, _SKIP_HREF_RE  # noqa: E402
-
-_TIMEOUT = 20
-_SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+_FETCH_TIMEOUT = 20
 _MAX_INDEX_CHILDREN = 5
 
 
@@ -35,9 +26,13 @@ def _localname(tag: str) -> str:
 
 
 def _fetch_text(url: str) -> str:
-    """GET *url* and return its body, or "" on any failure (non-fatal)."""
+    """GET *url* and return its body, or "" on any failure."""
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = requests.get(
+            url,
+            headers=_HEADERS,
+            timeout=_FETCH_TIMEOUT,
+        )
         if resp.status_code != 200:
             return ""
         return resp.text
@@ -58,13 +53,15 @@ def _loc_texts(root: ET.Element, child_tag: str) -> List[str]:
 
 
 def _collect_sitemap(
-    sitemap_url: str, add: Callable[[str], None], depth: int = 0
+    sitemap_url: str,
+    add: Callable[[str], None],
+    depth: int = 0,
 ) -> None:
     """Parse one sitemap, adding ``<loc>`` URLs via *add*.
 
-    Handles ``<urlset>`` (``<url><loc>``) and, one level deep, ``<sitemapindex>``
-    (recursing into at most :data:`_MAX_INDEX_CHILDREN` child sitemaps).
-    Failures are non-fatal.
+    Handles ``<urlset>`` (``<url><loc>``) and, one level deep,
+    ``<sitemapindex>`` (recursing into at most
+    :data:`_MAX_INDEX_CHILDREN` child sitemaps).
     """
     xml_text = _fetch_text(sitemap_url)
     if not xml_text:
@@ -82,7 +79,11 @@ def _collect_sitemap(
             _collect_sitemap(child_url, add, depth=depth + 1)
 
 
-def _collect_page_links(page_url: str, html: str, add: Callable[[str], None]) -> None:
+def _collect_page_links(
+    page_url: str,
+    html: str,
+    add: Callable[[str], None],
+) -> None:
     """Extract same-page ``<a href>`` links from *html* and hand to *add*."""
     for href in _A_HREF_RE.findall(html):
         href = href.strip()
@@ -108,12 +109,8 @@ def map_site(
     Returns ``{"success": True, "links": [{"url": ...}, ...]}`` with links
     deduped in first-seen order, filtered to the origin (plus subdomains
     when *include_subdomains*), optionally filtered by a case-insensitive
-    *search* substring on the URL, and capped at *limit*. Titles are
-    omitted (Firecrawl fills those from the SERP).
-
-    Robots/sitemap failures are non-fatal — the page's own links are used.
-    If the page itself cannot be fetched either, returns
-    ``{"success": False, "error": ...}``.
+    *search* substring on the URL, and capped at *limit*.
+    Titles are omitted (Firecrawl fills those from the SERP).
     """
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"

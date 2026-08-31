@@ -37,7 +37,7 @@ class _FakeResp:
         return None
 
 
-# ── parse_pdf ─────────────────────────────────────────────────────────
+# --- parse_pdf ---
 
 
 def test_parse_pdf_blank_page() -> None:
@@ -48,7 +48,7 @@ def test_parse_pdf_blank_page() -> None:
     assert out["metadata"]["title"] == "https://x/file.pdf"
 
 
-# ── scrape.extract PDF auto-detection ─────────────────────────────────
+# --- scrape.extract PDF auto-detection ---
 
 
 def test_extract_pdf_content_type(monkeypatch) -> None:
@@ -83,7 +83,7 @@ def test_extract_pdf_suffix_detection(monkeypatch) -> None:
     assert "html" not in data
 
 
-# ── /v2/parse route ───────────────────────────────────────────────────
+# --- /v2/parse route ---
 
 
 def test_parse_route_missing_url(server) -> None:
