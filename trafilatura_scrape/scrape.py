@@ -7,7 +7,9 @@ lives in :mod:`trafilatura_scrape.handler`.
 
 from __future__ import annotations
 
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urljoin
 
@@ -229,3 +231,30 @@ def extract(
             data[key] = computed[key]
     data["metadata"] = metadata
     return data
+
+
+def _safe_extract(url: str, formats: Optional[Union[List[Any], str]]) -> Dict[str, Any]:
+    """Extract one URL, converting any failure into a Firecrawl error doc."""
+    try:
+        return {"success": True, **extract(url, formats=formats)}
+    except Exception as exc:  # noqa: BLE001 — per-URL isolation, never raise
+        return {"success": False, "error": str(exc), "metadata": {"sourceURL": url}}
+
+
+def batch_extract(
+    urls: List[str],
+    formats: Optional[Union[List[Any], str]] = None,
+    max_workers: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Extract *urls* in parallel, preserving request order.
+
+    Each URL is scraped independently: a failure for one URL yields a
+    ``{"success": False, "error": …, "metadata": {"sourceURL": …}}``
+    item instead of failing the whole batch. Worker count comes from
+    *max_workers* or ``SCRAPE_MAX_WORKERS`` (default 4), capped at the
+    number of URLs.
+    """
+    workers = max_workers or int(os.environ.get("SCRAPE_MAX_WORKERS", "4"))
+    workers = min(max(1, workers), max(1, len(urls)))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(lambda u: _safe_extract(u, formats), urls))

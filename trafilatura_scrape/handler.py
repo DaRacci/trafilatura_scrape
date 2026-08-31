@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
-from trafilatura_scrape.scrape import extract
+from trafilatura_scrape.scrape import batch_extract, extract
 from trafilatura_scrape import search as search_mod
 from trafilatura_scrape.search import search as _search
 
@@ -133,6 +133,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._do_search(query, version=version, body=body)
             return
 
+        if path == "/v2/batch/scrape":
+            self._do_batch_scrape()
+            return
+
         if path not in ("/v1/scrape", "/v2/scrape"):
             self._err(
                 "Not found. Use POST /v2/scrape or POST /v2/search", status=404
@@ -172,6 +176,47 @@ class _Handler(BaseHTTPRequestHandler):
             log.exception("scrape failed for %s", url)
             self._err(str(exc), status=500)
 
+
+    def _do_batch_scrape(self) -> None:
+        """Sync batch scrape: parallel extraction, per-URL error isolation."""
+        # Read body
+        length = int(self.headers.get("Content-Length", "0"))
+        if length == 0:
+            self._err("Empty request body", status=400)
+            return
+
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError as exc:
+            self._err(f"Invalid JSON: {exc}", status=400)
+            return
+
+        urls = body.get("urls")
+        if (
+            not isinstance(urls, list)
+            or not urls
+            or not all(isinstance(u, str) and u.strip() for u in urls)
+        ):
+            self._err("'urls' must be a non-empty list of strings", status=400)
+            return
+        if len(urls) > 50:
+            self._err("too many urls (max 50)", status=400)
+            return
+
+        formats: List[Any] = body.get("formats", ["markdown"])
+
+        log.info("batch scraping %d urls (formats=%s)", len(urls), formats)
+        data = batch_extract(urls, formats=formats)
+        completed = sum(1 for d in data if d.get("success"))
+        self._json(
+            {
+                "success": True,
+                "status": "completed",
+                "completed": completed,
+                "total": len(urls),
+                "data": data,
+            }
+        )
 
 # ── Public API ────────────────────────────────────────────────────────
 
