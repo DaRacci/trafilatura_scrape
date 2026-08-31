@@ -11,12 +11,14 @@ import json
 import logging
 import os
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from typing import Any, Dict, List
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
 from trafilatura_scrape.scrape import extract
+from trafilatura_scrape import search as search_mod
+from trafilatura_scrape.search import search as _search
 
 log = logging.getLogger("trafilatura-scrape")
 
@@ -49,19 +51,92 @@ class _Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path.rstrip("/")
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
         if path == "/health":
             self._json({"status": "ok", "service": "trafilatura-scrape"})
+            return
+        if path in ("/v1/search", "/v2/search"):
+            version = 1 if path.startswith("/v1") else 2
+            params = parse_qs(parsed.query)
+            q = (params.get("q") or [""])[0].strip()
+            if not q:
+                self._err("Missing 'q' query parameter", status=400)
+                return
+            body: Dict[str, Any] = {}
+            if params.get("limit"):
+                body["limit"] = params["limit"][0]
+            if params.get("offset"):
+                body["offset"] = params["offset"][0]
+            self._do_search(q, version=version, body=body)
+            return
+        self._err(
+            "Not found. Use POST /v2/scrape, POST /v2/search or GET /health",
+            status=404,
+        )
+
+    def _do_search(
+        self, query: str, version: int, body: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Run a search and emit the response (shared by GET and POST).
+
+        Honors the Firecrawl v2 search request fields ``limit``,
+        ``offset``, ``sources`` and ``scrapeOptions.formats`` when given.
+        """
+        body = body or {}
+        try:
+            limit = int(body.get("limit") or 5)
+            offset = int(body.get("offset") or 0)
+        except (TypeError, ValueError):
+            self._err("'limit' and 'offset' must be integers", status=400)
+            return
+        sources = body.get("sources") or None
+        scrape_opts = body.get("scrapeOptions") or {}
+        formats = scrape_opts.get("formats")
+
+        out = _search(
+            query,
+            limit=limit,
+            offset=offset,
+            sources=sources,
+            scrape_formats=formats,
+            version=version,
+        )
+        if not out.get("success"):
+            self._err(out.get("error", "search failed"), status=503)
         else:
-            self._err(
-                "Not found. Use POST /v1/scrape or GET /health",
-                status=404,
-            )
+            self._json(out)
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/")
+        if path in ("/v1/search", "/v2/search"):
+            version = 1 if path.startswith("/v1") else 2
+
+            # Read body
+            length = int(self.headers.get("Content-Length", "0"))
+            if length == 0:
+                self._err("Empty request body", status=400)
+                return
+
+            try:
+                body = json.loads(self.rfile.read(length))
+            except json.JSONDecodeError as exc:
+                self._err(f"Invalid JSON: {exc}", status=400)
+                return
+
+            query = (body.get("query") or "").strip()
+            if not query:
+                self._err("Missing 'query' field", status=400)
+                return
+
+            log.info("searching: %r  (v%d)", query, version)
+            self._do_search(query, version=version, body=body)
+            return
+
         if path not in ("/v1/scrape", "/v2/scrape"):
-            self._err("Not found. Use POST /v2/scrape (or /v1/scrape)", status=404)
+            self._err(
+                "Not found. Use POST /v2/scrape or POST /v2/search", status=404
+            )
             return
 
         # Read body
