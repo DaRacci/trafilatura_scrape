@@ -1,8 +1,15 @@
-{ lib, python3Packages }:
+{
+  lib,
+  python3Packages,
+}:
 
-python3Packages.buildPythonPackage rec {
-  pname = "trafilatura-scrape";
-  version = "1.0.0";
+let
+  pyproject = lib.importTOML ../pyproject.toml;
+in
+
+python3Packages.buildPythonPackage {
+  pname = pyproject.project.name;
+  version = pyproject.project.version;
   src = ./..;
   pyproject = true;
   build-system = [ python3Packages.setuptools ];
@@ -12,11 +19,11 @@ python3Packages.buildPythonPackage rec {
   ];
   doCheck = false;
   pythonImportsCheck = [ "trafilatura_scrape" ];
-  meta = with lib; {
-    description = "Firecrawl-compatible web scrape server backed by trafilatura";
-    homepage = "https://codeberg.org/racci/trafilatura_scrape";
-    license = licenses.mit;
+  meta = {
+    description = pyproject.project.description;
+    homepage = pyproject.project.urls.Homepage;
+    license = lib.licenses.${lib.toLower pyproject.project.license.text};
     maintainers = [ ];
-    mainProgram = "trafilatura-scrape";
+    mainProgram = pyproject.project.name;
   };
 }
