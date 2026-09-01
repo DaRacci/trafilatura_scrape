@@ -14,6 +14,7 @@ python3Packages.buildPythonPackage {
   pyproject = true;
   build-system = [ python3Packages.setuptools ];
   propagatedBuildInputs = with python3Packages; [
+    pypdf
     trafilatura
     requests
   ];

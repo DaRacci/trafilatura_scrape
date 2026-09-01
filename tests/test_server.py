@@ -9,7 +9,7 @@ from urllib.request import urlopen
 import pytest
 
 from trafilatura_scrape import __version__, create_app
-from trafilatura_scrape.server import _extract_title
+from trafilatura_scrape.scrape import _extract_title
 
 
 class TestVersion:
@@ -39,7 +39,6 @@ class TestExtractTitle:
 
 class TestCreateApp:
     def test_create_app_defaults(self):
-        """create_app() returns a bound HTTPServer (on a free port)."""
         os.environ["SCRAPE_PORT"] = "0"
         server = create_app()
         assert isinstance(server, HTTPServer)
@@ -60,7 +59,7 @@ class TestServerEndToEnd:
 
     @pytest.fixture
     def server(self):
-        from trafilatura_scrape.server import _Handler as Handler
+        from trafilatura_scrape.handler import _Handler as Handler
 
         real_server = HTTPServer(("127.0.0.1", 0), Handler)
         t = Thread(target=real_server.serve_forever, daemon=True)

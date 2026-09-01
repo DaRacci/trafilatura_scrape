@@ -1,8 +1,8 @@
-"""Entry point — run with ``python -m trafilatura_scrape`` or ``trafilatura-scrape``."""
+"""Entry point, run with ``python -m trafilatura_scrape`` or ``trafilatura-scrape``."""
 
 import sys
 
-from trafilatura_scrape.server import serve
+from trafilatura_scrape.handler import serve
 
 
 def main() -> None:
