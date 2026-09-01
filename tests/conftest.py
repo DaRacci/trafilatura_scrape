@@ -10,7 +10,6 @@ from trafilatura_scrape.handler import _Handler
 
 @pytest.fixture
 def server():
-    """Start the handler in-process on an ephemeral port; yield (base_url, httpd)."""
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     t = Thread(target=httpd.serve_forever, daemon=True)
     t.start()

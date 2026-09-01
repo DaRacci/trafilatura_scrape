@@ -39,7 +39,6 @@ class TestExtractTitle:
 
 class TestCreateApp:
     def test_create_app_defaults(self):
-        """create_app() returns a bound HTTPServer (on a free port)."""
         os.environ["SCRAPE_PORT"] = "0"
         server = create_app()
         assert isinstance(server, HTTPServer)

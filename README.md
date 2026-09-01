@@ -50,7 +50,7 @@ The `web_extract` tool routes through this server automatically.
 |---|---|---|
 | GET | `/health` | Liveness check |
 | POST | `/v1/scrape` | Scrape a page (v1 compat alias of `/v2/scrape`) |
-| POST | `/v2/scrape` | Scrape a page (PDF URLs auto-route to `/v2/parse`) |
+| POST | `/v2/scrape` | Scrape a page (PDF URLs parsed automatically) |
 | POST | `/v2/batch/scrape` | Scrape up to 50 URLs concurrently |
 | POST | `/v2/map` | List URLs for a site (sitemap + page links) |
 | POST | `/v2/parse` | Extract PDF text |
@@ -61,7 +61,7 @@ The `web_extract` tool routes through this server automatically.
 
 **Request:**
 ```json
-{"url": "https://example.com", "formats": ["markdown", "links"]}
+{"url": "https://example.com", "formats": ["markdown", "links", {"type": "screenshot"}]}
 ```
 
 **Response:**
@@ -70,8 +70,8 @@ The `web_extract` tool routes through this server automatically.
   "success": true,
   "data": {
     "markdown": "# Markdown content...",
-    "links": {"internal": ["https://example.com/about"], "external": []},
-    "warning": "Skipping unsupported format(s): screenshot",
+    "links": ["https://example.com/about"],
+    "warning": "Formats not supported by this backend: screenshot",
     "metadata": {
       "title": "Page Title",
       "sourceURL": "https://example.com",
@@ -140,7 +140,7 @@ PDF URLs are auto-detected and parsed with `pypdf`.
 
 **Request:** `{"url": "https://example.com/paper.pdf"}`
 
-**Response:** PDF text as markdown plus `metadata.numPages`.
+**Response:** PDF text as markdown.
 OCR is not used.
 
 ### `GET /health`
@@ -156,7 +156,7 @@ Returns `{"status": "ok", "service": "trafilatura-scrape"}`.
 | `markdown` | Trafilatura extraction |
 | `html` | Trafilatura extraction |
 | `rawHtml` | Raw response body |
-| `links` | `{internal: [...], external: [...]}` |
+| `links` | Flat list of URL strings |
 | `images` | Image URL list |
 | `summary` | Extractive first ~200 chars |
 | `screenshot`, `json`, `changeTracking`, `query`, `branding`, `product`, ... | Skipped; a `warning` string names them |

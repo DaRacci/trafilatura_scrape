@@ -1,5 +1,4 @@
-"""Firecrawl-compatible HTTP server backed by trafilatura.
-"""
+"""Firecrawl-compatible HTTP server backed by trafilatura."""
 
 from __future__ import annotations
 
@@ -7,11 +6,8 @@ import json
 import logging
 import os
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
-
-if TYPE_CHECKING:
-    from trafilatura_scrape.handler import _Handler
 
 import requests
 
@@ -28,11 +24,15 @@ _MAP_DEFAULT_LIMIT = 100
 _BATCH_MAX_URLS = 50
 _SEARCH_DEFAULT_LIMIT = 5
 
+_FETCH_EXC = (requests.RequestException, ValueError, KeyError, OSError)
 
-def _read_json_body(handler: "_Handler") -> Optional[Dict[str, Any]]:
+
+def _read_json_body(
+    handler: Any,
+) -> Optional[Dict[str, Any]]:
     """Read the request body as JSON.
 
-    Returns None and emits the error response
+    Returns None and emits the error response,
     when the body is empty or not valid JSON.
     """
     length = int(handler.headers.get("Content-Length", "0"))
@@ -46,6 +46,20 @@ def _read_json_body(handler: "_Handler") -> Optional[Dict[str, Any]]:
         return None
 
 
+def _required_url(body: Dict[str, Any]) -> Optional[str]:
+    """Return the stripped 'url' field.
+
+    Returns None when the field is missing or blank.
+    """
+    url = (body.get("url") or "").strip()
+    return url or None
+
+
+def _formats(body: Dict[str, Any]) -> List[Any]:
+    """Return the requested output formats, with the default applied."""
+    return body.get("formats", [_DEFAULT_FORMAT])
+
+
 def _error(exc: Exception) -> Tuple[int, str]:
     """Map an upstream fetch failure to a (status, message) pair."""
     if isinstance(exc, requests.Timeout):
@@ -57,10 +71,10 @@ def _error(exc: Exception) -> Tuple[int, str]:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """HTTP 1.0 handler for /v1/scrape."""
+    """Handler for the /v1 and /v2 HTTP API routes."""
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - base class API
-        log.info("%s - %s", self.client_address[0], format % args)
+    def log_message(self, fmt: str, *args: Any) -> None:
+        log.info("%s - %s", self.client_address[0], fmt % args)
 
     def _json(self, data: Dict[str, Any], status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -97,44 +111,38 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/")
-        if path in ("/v1/scrape", "/v2/scrape"):
-            self._do_scrape()
-            return
-        if path == "/v2/batch/scrape":
-            self._do_batch_scrape()
-            return
-        if path == "/v2/parse":
-            self._do_parse()
-            return
-        if path == "/v2/map":
-            self._do_map()
-            return
-        if path in ("/v1/search", "/v2/search"):
-            version = 1 if path.startswith("/v1") else 2
-            self._do_post_search(version=version)
-            return
-        self._err("Not found", status=404)
+        match path:
+            case "/v1/scrape" | "/v2/scrape":
+                self._do_scrape()
+            case "/v2/batch/scrape":
+                self._do_batch_scrape()
+            case "/v2/parse":
+                self._do_parse()
+            case "/v2/map":
+                self._do_map()
+            case "/v1/search" | "/v2/search":
+                version = 1 if path.startswith("/v1") else 2
+                self._do_post_search(version=version)
+            case _:
+                self._err("Not found", status=404)
 
     def _do_scrape(self) -> None:
         """Handle POST /v{1,2}/scrape."""
         body = _read_json_body(self)
         if body is None:
             return
-        url = (body.get("url") or "").strip()
-        if not url:
+        url = _required_url(body)
+        if url is None:
             self._err("Missing 'url' field", status=400)
             return
 
-        formats: List[Any] = body.get(
-            "formats",
-            [_DEFAULT_FORMAT],
-        )
+        formats = _formats(body)
 
         log.info("scraping: %s (formats=%s)", url, formats)
         try:
             data = extract(url, formats=formats)
             self._json({"success": True, "data": data})
-        except Exception as exc:
+        except _FETCH_EXC as exc:
             log.exception("scrape failed for %s", url)
             status, msg = _error(exc)
             self._err(msg, status=status)
@@ -158,7 +166,7 @@ class _Handler(BaseHTTPRequestHandler):
         version: int,
         body: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Run a search and emit the response (shared by GET and POST)."""
+        """Run a search and emit the response."""
         body = body or {}
         try:
             limit = int(body.get("limit") or _SEARCH_DEFAULT_LIMIT)
@@ -188,8 +196,8 @@ class _Handler(BaseHTTPRequestHandler):
         body = _read_json_body(self)
         if body is None:
             return
-        url = (body.get("url") or "").strip()
-        if not url:
+        url = _required_url(body)
+        if url is None:
             self._err("Missing 'url' field", status=400)
             return
 
@@ -221,7 +229,7 @@ class _Handler(BaseHTTPRequestHandler):
                     },
                 }
             )
-        except Exception as exc:
+        except _FETCH_EXC as exc:
             log.exception("parse failed for %s", url)
             status, msg = _error(exc)
             self._err(msg, status=status)
@@ -231,8 +239,8 @@ class _Handler(BaseHTTPRequestHandler):
         body = _read_json_body(self)
         if body is None:
             return
-        url = (body.get("url") or "").strip()
-        if not url:
+        url = _required_url(body)
+        if url is None:
             self._err("Missing 'url' field", status=400)
             return
 
@@ -277,10 +285,7 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
 
-        formats: List[Any] = body.get(
-            "formats",
-            [_DEFAULT_FORMAT],
-        )
+        formats = _formats(body)
 
         log.info("batch scraping %d urls (formats=%s)", len(urls), formats)
         data = batch_extract(urls, formats=formats)

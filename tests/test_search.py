@@ -15,7 +15,7 @@ FIXTURE = {
     "results": [
         {
             "url": "https://github.com/mendableai/firecrawl",
-            "title": "firecrawl: 🔥 Turn websites into LLM-ready markdown",
+            "title": "firecrawl: Turn websites into LLM-ready markdown",
             "content": "Firecrawl is an API service that takes a URL, crawls it, and returns markdown.",
             "engine": "duckduckgo",
             "engines": ["duckduckgo"],
@@ -26,7 +26,7 @@ FIXTURE = {
         },
         {
             "url": "https://www.firecrawl.dev/",
-            "title": "Firecrawl — The Web Data API for LLMs",
+            "title": "Firecrawl: The Web Data API for LLMs",
             "content": "Extract structured data from any website for your AI apps.",
             "engine": "google",
             "engines": ["google"],
@@ -76,7 +76,6 @@ def _fake_get_factory(calls):
 
 @pytest.fixture
 def capture(monkeypatch):
-    """Fake requests.get in search.py's namespace; capture call kwargs."""
     calls = []
     monkeypatch.setattr(search_mod.requests, "get", _fake_get_factory(calls))
     monkeypatch.setenv("SEARXNG_URL", "https://searx.example.test")

@@ -86,7 +86,7 @@ class TestMapSite:
     def test_map_merges_sitemap_and_links(self, patch_standard):
         out = map_site("https://example.com")
         assert out["success"] is True
-        urls = [l["url"] for l in out["links"]]
+        urls = [link["url"] for link in out["links"]]
         # 3 sitemap entries + 1 new page link (the duplicate is dropped)
         assert len(urls) == 4
         assert len(set(urls)) == 4
@@ -103,12 +103,12 @@ class TestMapSite:
     def test_map_search_filter(self, patch_standard):
         out = map_site("https://example.com", search="blog")
         assert out["success"] is True
-        urls = [l["url"] for l in out["links"]]
+        urls = [link["url"] for link in out["links"]]
         assert urls == ["https://example.com/blog/post-1"]
 
     def test_map_search_filter_case_insensitive(self, patch_standard):
         out = map_site("https://example.com", search="BLOG")
-        urls = [l["url"] for l in out["links"]]
+        urls = [link["url"] for link in out["links"]]
         assert urls == ["https://example.com/blog/post-1"]
 
     def test_map_include_subdomains(self, monkeypatch):
@@ -125,12 +125,12 @@ class TestMapSite:
         monkeypatch.setattr(map_mod.requests, "get", make_get(routes))
 
         default = map_site("https://example.com")
-        assert [l["url"] for l in default["links"]] == [
+        assert [link["url"] for link in default["links"]] == [
             "https://example.com/home"
         ]
 
         sub = map_site("https://example.com", include_subdomains=True)
-        assert [l["url"] for l in sub["links"]] == [
+        assert [link["url"] for link in sub["links"]] == [
             "https://example.com/home",
             "https://docs.example.com/x",
         ]
@@ -147,7 +147,7 @@ class TestMapSite:
         monkeypatch.setattr(map_mod.requests, "get", make_get(routes))
         out = map_site("https://example.com")
         assert out["success"] is True
-        assert [l["url"] for l in out["links"]] == [
+        assert [link["url"] for link in out["links"]] == [
             "https://example.com/a",
             "https://example.com/b",
         ]
@@ -183,7 +183,7 @@ class TestMapSite:
         }
         monkeypatch.setattr(map_mod.requests, "get", make_get(routes))
         out = map_site("https://example.com")
-        urls = [l["url"] for l in out["links"]]
+        urls = [link["url"] for link in out["links"]]
         assert "https://example.com/p1" in urls
         # index child (p1) + page links (blog/post-1, contact)
         assert len(urls) == 3
@@ -213,7 +213,7 @@ class TestMapRoute:
         assert status == 200
         assert body["success"] is True
         assert len(body["links"]) == 4
-        assert all("url" in l for l in body["links"])
+        assert all("url" in link for link in body["links"])
 
     def test_v2_map_missing_url(self, server):
         base, _ = server

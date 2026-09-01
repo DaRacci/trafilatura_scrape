@@ -110,7 +110,7 @@ def map_site(
     deduped in first-seen order, filtered to the origin (plus subdomains
     when *include_subdomains*), optionally filtered by a case-insensitive
     *search* substring on the URL, and capped at *limit*.
-    Titles are omitted (Firecrawl fills those from the SERP).
+    Titles are omitted.
     """
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -125,7 +125,6 @@ def map_site(
         seen.add(raw)
         links.append(raw)
 
-    # 1. Sitemap discovery: robots.txt "Sitemap:" lines, else /sitemap.xml.
     sitemap_urls: List[str] = []
     robots_txt = _fetch_text(origin + "/robots.txt")
     for line in robots_txt.splitlines():
@@ -139,7 +138,6 @@ def map_site(
     for sm_url in sitemap_urls:
         _collect_sitemap(sm_url, add)
 
-    # 2. Always also fetch the page itself and take its <a href> links.
     page_html = _fetch_text(url)
     if page_html:
         _collect_page_links(url, page_html, add)
@@ -150,7 +148,6 @@ def map_site(
             "error": f"could not fetch page or sitemap for {url}",
         }
 
-    # 3. Origin filter (subdomains only when include_subdomains).
     def allowed(link: str) -> bool:
         host = (urlparse(link).hostname or "").lower()
         if host == base_host:
@@ -159,12 +156,10 @@ def map_site(
 
     links = [lnk for lnk in links if allowed(lnk)]
 
-    # 4. Optional case-insensitive search substring filter on the URL.
     if search:
         needle = search.lower()
         links = [lnk for lnk in links if needle in lnk.lower()]
 
-    # 5. Cap at limit.
     links = links[: max(0, int(limit))]
 
     return {"success": True, "links": [{"url": lnk} for lnk in links]}

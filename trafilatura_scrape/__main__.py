@@ -1,4 +1,4 @@
-"""Entry point — run with ``python -m trafilatura_scrape`` or ``trafilatura-scrape``."""
+"""Entry point, run with ``python -m trafilatura_scrape`` or ``trafilatura-scrape``."""
 
 import sys
 
